@@ -7,108 +7,113 @@ import os
 import re
 
 app = Flask(__name__)
-beauty_posts = []
+gossip_posts = []
 
-def get_real_image_url(ptt_link):
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        res = requests.get(ptt_link, cookies={"over18": "1"}, headers=headers, timeout=5)
-        # 匹配 Imgur 連結
-        match = re.search(r'https?://(?:i\.)?imgur\.com/[A-Za-z0-9]+', res.text)
-        if match:
-            url = match.group(0)
-            if "i.imgur.com" not in url:
-                url = url.replace("imgur.com", "i.imgur.com") + ".jpg"
-            elif not url.endswith(('.jpg', '.png', '.jpeg')):
-                url += ".jpg"
-            return url
-    except:
-        pass
-    return None
-
-def fetch_beauty_massive():
-    global beauty_posts
+def fetch_gossip_100():
+    global gossip_posts
     while True:
         try:
             cookies = {"over18": "1"}
-            base_url = "https://www.ptt.cc/bbs/Beauty/index.html"
-            res = requests.get(base_url, cookies=cookies, timeout=10)
+            # 先抓首頁取得最新頁碼
+            res = requests.get("https://www.ptt.cc/bbs/Gossiping/index.html", cookies=cookies, timeout=10)
             soup = BeautifulSoup(res.text, "html.parser")
-            
-            # 取得最新頁碼
             prev_link = soup.select("div.btn-group-paging a")[1]["href"]
             latest_page = int(re.search(r'index(\d+)\.html', prev_link).group(1)) + 1
             
-            all_temp_posts = []
-            # --- 關鍵修正：往回翻 10 頁 ---
-            print("正在深度掃描最近 10 頁的文章...")
-            for p in range(latest_page, latest_page - 10, -1):
-                p_url = f"https://www.ptt.cc/bbs/Beauty/index{p}.html"
+            all_data = []
+            # --- 核心：掃描 100 頁 ---
+            print(f"正在掃描八卦版 100 頁 (從第 {latest_page} 頁開始)...")
+            for p in range(latest_page, latest_page - 100, -1):
+                p_url = f"https://www.ptt.cc/bbs/Gossiping/index{p}.html"
                 p_res = requests.get(p_url, cookies=cookies, timeout=10)
                 p_soup = BeautifulSoup(p_res.text, "html.parser")
                 
                 for art in p_soup.select("div.r-ent"):
-                    push = art.select_one("div.nrec span")
-                    push_num = 100 if push and push.text == "爆" else int(push.text) if (push and push.text.isdigit()) else 0
-                    
                     t_tag = art.select_one("div.title a")
-                    if t_tag and "[正妹]" in t_tag.text and push_num >= 30:
-                        art_url = "https://www.ptt.cc" + t_tag["href"]
-                        # 避免重複抓取
-                        if not any(d['url'] == art_url for d in all_temp_posts):
-                            img = get_real_image_url(art_url)
-                            if img:
-                                all_temp_posts.append({
-                                    "title": t_tag.text,
-                                    "url": art_url,
-                                    "img": img,
-                                    "push": push_num
-                                })
+                    if t_tag:
+                        # 處理推文數
+                        nrec = art.select_one("div.nrec span")
+                        push = nrec.text if nrec else "0"
+                        
+                        all_data.append({
+                            "title": t_tag.text,
+                            "url": "https://www.ptt.cc" + t_tag["href"],
+                            "push": push,
+                            "author": art.select_one("div.author").text if art.select_one("div.author") else "unknown",
+                            "date": art.select_one("div.date").text
+                        })
+                # 每抓 10 頁稍微休息一下，避免被封
+                if p % 10 == 0:
+                    time.sleep(0.5)
             
-            # 按推文數排序，把「爆」的排最前面
-            beauty_posts = sorted(all_temp_posts, key=lambda x: x['push'], reverse=True)
-            print(f"深度抓取完成，共 {len(beauty_posts)} 篇")
+            gossip_posts = all_data
+            print(f"掃描完成！共抓取 {len(gossip_posts)} 條標題")
             
         except Exception as e:
-            print(f"抓取發生錯誤: {e}")
+            print(f"抓取失敗: {e}")
         
-        time.sleep(600) # 10分鐘掃一次就好，避免被PTT封鎖
+        # 八卦版更新快，建議每 10 分鐘大更新一次即可
+        time.sleep(600)
 
 @app.route('/')
 def home():
     style = """
     <style>
-        body { font-family: sans-serif; background: #000; color: #fff; margin: 0; }
-        .header { background: #ff4081; padding: 20px; text-align: center; position: sticky; top: 0; z-index: 100; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; padding: 15px; }
-        .card { position: relative; border-radius: 10px; overflow: hidden; background: #222; height: 400px; }
-        .card img { width: 100%; height: 100%; object-fit: cover; }
-        .overlay { position: absolute; bottom: 0; background: linear-gradient(transparent, rgba(0,0,0,0.8)); width: 100%; padding: 15px; box-sizing: border-box; }
-        .push-badge { background: #ff4081; padding: 2px 8px; border-radius: 5px; font-weight: bold; margin-right: 5px; }
-        a { color: white; text-decoration: none; font-size: 14px; }
+        body { font-family: sans-serif; background: #f0f2f5; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .search-box { width: 100%; padding: 10px; margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; }
+        .post-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+        .push { width: 40px; text-align: center; font-weight: bold; margin-right: 15px; }
+        .push-hot { color: #f00; }
+        .title { flex-grow: 1; text-decoration: none; color: #1c1e21; }
+        .title:hover { color: #1877f2; }
+        .meta { font-size: 12px; color: #65676b; margin-left: 10px; }
     </style>
     """
-    cards = "".join([f"""
-        <div class='card'>
-            <a href='{p['url']}' target='_blank'>
-                <img src='{p['img']}' loading='lazy'>
-                <div class='overlay'>
-                    <span class='push-badge'>{p['push']}推</span> {p['title']}
-                </div>
-            </a>
+    
+    # 搜尋功能的簡單 JavaScript
+    script = """
+    <script>
+    function searchPosts() {
+        let input = document.getElementById('searchInput').value.toLowerCase();
+        let posts = document.getElementsByClassName('post-item');
+        for (let i = 0; i < posts.length; i++) {
+            let title = posts[i].getElementsByClassName('title')[0].innerText.toLowerCase();
+            posts[i].style.display = title.includes(input) ? "" : "none";
+        }
+    }
+    </script>
+    """
+    
+    rows = ""
+    for p in gossip_posts:
+        push_class = "push-hot" if "爆" in p['push'] or (p['push'].isdigit() and int(p['push']) > 50) else ""
+        rows += f"""
+        <div class='post-item'>
+            <span class='push {push_class}'>{p['push']}</span>
+            <a class='title' href='{p['url']}' target='_blank'>{p['title']}</a>
+            <span class='meta'>{p['date']} | {p['author']}</span>
         </div>
-    """ for p in beauty_posts])
+        """
 
     return f"""
     <html>
-        <head><meta name="viewport" content="width=device-width, initial-scale=1">{style}</head>
+        <head>
+            <title>八卦 100 頁考古器</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            {style}
+        </head>
         <body>
-            <div class='header'><h1>PTT 正妹雷達 (近期熱門)</h1></div>
-            <div class='grid'>{cards if cards else '<h2>正在深入挖掘 PTT 歷史資料，請 30 秒後重新整理...</h2>'}</div>
+            <div class='container'>
+                <h1>八卦版 100 頁考古器</h1>
+                <input type="text" id="searchInput" onkeyup="searchPosts()" placeholder="輸入關鍵字搜尋標題..." class="search-box">
+                <div id="postList">{rows if rows else '<h2>正在挖掘資料中，請稍候並刷新網頁...</h2>'}</div>
+            </div>
+            {script}
         </body>
     </html>
     """
 
 if __name__ == "__main__":
-    threading.Thread(target=fetch_beauty_massive, daemon=True).start()
+    threading.Thread(target=fetch_gossip_100, daemon=True).start()
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
