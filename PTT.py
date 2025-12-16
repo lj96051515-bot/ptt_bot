@@ -91,5 +91,6 @@ if __name__ == "__main__":
     # 開啟 HTTP server 保持 Render 活動
     threading.Thread(target=run_server, daemon=True).start()
     # 啟動 PTT bot，預設往前抓 3 頁
-    ptt_bot_task(history_pages=3)
+    ptt_bot_task(history_pages=100)
+
 
