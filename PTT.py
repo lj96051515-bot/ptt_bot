@@ -4,6 +4,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from bs4 import BeautifulSoup
+import csv
 
 # --------- HTTP Server（保持 Render 活動用） ---------
 PORT = int(os.environ.get("PORT", 8000))
@@ -21,6 +22,14 @@ def run_server():
     httpd.serve_forever()
 
 # --------- PTT 爬蟲 / Bot ---------
+CSV_FILE = "ptt_new_posts.csv"
+
+# 如果檔案不存在，先建立 CSV 標題
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["標題", "連結", "抓取時間"])
+
 def ptt_bot_task():
     url = "https://www.ptt.cc/bbs/Gossiping/index.html"
     cookies = {"over18": "1"}
@@ -51,6 +60,11 @@ def ptt_bot_task():
                 print("==== 新文章 ====")
                 for title, link in new_posts:
                     print(title, link)
+                # 存到 CSV
+                with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    for title, link in new_posts:
+                        writer.writerow([title, link, time.strftime("%Y-%m-%d %H:%M:%S")])
             else:
                 print("沒有新文章。")
 
