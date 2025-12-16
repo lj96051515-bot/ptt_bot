@@ -4,74 +4,69 @@ import time
 import threading
 from flask import Flask
 import os
-import re
 
 app = Flask(__name__)
 gossip_posts = []
 
-def fetch_gossip_100():
+def fetch_gossip_boom():
     global gossip_posts
     while True:
         try:
             cookies = {"over18": "1"}
-            # 先抓首頁取得最新頁碼
-            res = requests.get("https://www.ptt.cc/bbs/Gossiping/index.html", cookies=cookies, timeout=10)
-            soup = BeautifulSoup(res.text, "html.parser")
-            prev_link = soup.select("div.btn-group-paging a")[1]["href"]
-            latest_page = int(re.search(r'index(\d+)\.html', prev_link).group(1)) + 1
-            
             all_data = []
-            # --- 核心：掃描 100 頁 ---
-            print(f"正在掃描八卦版 100 頁 (從第 {latest_page} 頁開始)...")
-            for p in range(latest_page, latest_page - 100, -1):
-                p_url = f"https://www.ptt.cc/bbs/Gossiping/index{p}.html"
-                p_res = requests.get(p_url, cookies=cookies, timeout=10)
-                p_soup = BeautifulSoup(p_res.text, "html.parser")
+            
+            # PTT 搜尋結果一頁有 20 則，抓 50 頁剛好是 1000 則
+            print("正在跨時空抓取八卦版 1000 則爆文...")
+            for i in range(1, 51):
+                # 直接使用搜尋參數 q=recommend:100 (只看爆文)
+                search_url = f"https://www.ptt.cc/bbs/Gossiping/search?page={i}&q=recommend%3A100"
+                res = requests.get(search_url, cookies=cookies, timeout=10)
+                soup = BeautifulSoup(res.text, "html.parser")
                 
-                for art in p_soup.select("div.r-ent"):
+                arts = soup.select("div.r-ent")
+                if not arts: # 如果沒東西了就停止
+                    break
+                
+                for art in arts:
                     t_tag = art.select_one("div.title a")
                     if t_tag:
-                        # 處理推文數
-                        nrec = art.select_one("div.nrec span")
-                        push = nrec.text if nrec else "0"
-                        
                         all_data.append({
                             "title": t_tag.text,
                             "url": "https://www.ptt.cc" + t_tag["href"],
-                            "push": push,
+                            "push": "爆",
                             "author": art.select_one("div.author").text if art.select_one("div.author") else "unknown",
                             "date": art.select_one("div.date").text
                         })
-                # 每抓 10 頁稍微休息一下，避免被封
-                if p % 10 == 0:
+                
+                # 稍微休息，避免被 PTT 擋掉
+                if i % 10 == 0:
                     time.sleep(0.5)
             
             gossip_posts = all_data
-            print(f"掃描完成！共抓取 {len(gossip_posts)} 條標題")
+            print(f"抓取完成！共存儲 {len(gossip_posts)} 則爆文標題")
             
         except Exception as e:
             print(f"抓取失敗: {e}")
         
-        # 八卦版更新快，建議每 10 分鐘大更新一次即可
-        time.sleep(600)
+        # 爆文更新不快，每 30 分鐘更新一次即可
+        time.sleep(1800)
 
 @app.route('/')
 def home():
     style = """
     <style>
-        body { font-family: sans-serif; background: #f0f2f5; color: #333; margin: 0; padding: 20px; }
-        .container { max-width: 900px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .search-box { width: 100%; padding: 10px; margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; }
-        .post-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
-        .push { width: 40px; text-align: center; font-weight: bold; margin-right: 15px; }
-        .push-hot { color: #f00; }
-        .title { flex-grow: 1; text-decoration: none; color: #1c1e21; }
-        .title:hover { color: #1877f2; }
-        .meta { font-size: 12px; color: #65676b; margin-left: 10px; }
+        body { font-family: sans-serif; background: #121212; color: #eee; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: auto; }
+        .header { background: #f44336; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px; }
+        .search-box { width: 100%; padding: 12px; margin-bottom: 20px; border: none; border-radius: 4px; background: #333; color: white; font-size: 16px; }
+        .post-item { display: flex; align-items: center; padding: 12px; border-bottom: 1px solid #333; background: #1e1e1e; margin-bottom: 5px; border-radius: 4px; }
+        .push { color: #ff5252; font-weight: bold; width: 50px; text-align: center; font-size: 1.1em; }
+        .title { flex-grow: 1; text-decoration: none; color: #82b1ff; font-weight: bold; }
+        .title:hover { text-decoration: underline; }
+        .meta { font-size: 12px; color: #888; margin-left: 10px; }
     </style>
     """
     
-    # 搜尋功能的簡單 JavaScript
     script = """
     <script>
     function searchPosts() {
@@ -87,10 +82,9 @@ def home():
     
     rows = ""
     for p in gossip_posts:
-        push_class = "push-hot" if "爆" in p['push'] or (p['push'].isdigit() and int(p['push']) > 50) else ""
         rows += f"""
         <div class='post-item'>
-            <span class='push {push_class}'>{p['push']}</span>
+            <span class='push'>{p['push']}</span>
             <a class='title' href='{p['url']}' target='_blank'>{p['title']}</a>
             <span class='meta'>{p['date']} | {p['author']}</span>
         </div>
@@ -99,15 +93,15 @@ def home():
     return f"""
     <html>
         <head>
-            <title>八卦 100 頁考古器</title>
+            <title>八卦版爆文考古器</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             {style}
         </head>
         <body>
             <div class='container'>
-                <h1>八卦版 100 頁考古器</h1>
-                <input type="text" id="searchInput" onkeyup="searchPosts()" placeholder="輸入關鍵字搜尋標題..." class="search-box">
-                <div id="postList">{rows if rows else '<h2>正在挖掘資料中，請稍候並刷新網頁...</h2>'}</div>
+                <div class='header'><h1>八卦版 1000 則爆文考古器</h1></div>
+                <input type="text" id="searchInput" onkeyup="searchPosts()" placeholder="在 1000 則爆文中搜尋關鍵字..." class="search-box">
+                <div id="postList">{rows if rows else '<h2>正在時光旅行中...預計 30 秒後完成抓取，請稍候刷新。</h2>'}</div>
             </div>
             {script}
         </body>
@@ -115,5 +109,5 @@ def home():
     """
 
 if __name__ == "__main__":
-    threading.Thread(target=fetch_gossip_100, daemon=True).start()
+    threading.Thread(target=fetch_gossip_boom, daemon=True).start()
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
